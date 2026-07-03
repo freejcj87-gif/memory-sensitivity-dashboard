@@ -5,6 +5,7 @@
 기초 추정치: 삼성전자 = 한국투자증권 2Q26 Preview(2026-07-02),
 SK하이닉스 = 컨센서스 + 자체 조립(마진 가정). 투자 자문 아님.
 """
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -52,6 +53,21 @@ SAMSUNG = dict(
                  guide_share="현재 17% · HBM4 배분 전망 ~25% · 리포트 함의 46%"),
     ),
     source="한국투자증권 2Q26 Preview (2026-07-02) 표7 · HBM/범용 분리는 HBM 마진 60% 가정",
+    target_note=(
+        "**한국투자증권 목표주가 590,000원의 가정치** (2026-07-02): "
+        "범용 DRAM $2.26/Gb (2026 대비 +24%) · NAND $0.39 (+33%) · HBM $2.88/Gb (+93%) · "
+        "HBM 점유율 ~46% (2027년 업계 1위) · 2027 EPS 61,068원. "
+        "원 리포트는 12MF BPS 118,062원 x 목표 PBR 5.0배로 산출 — 이 모델의 PER 프레임으로는 "
+        "2027 EPS x **9.7배**에 해당. 아래에서 시나리오를 적용해 확인해 보세요."
+    ),
+    targets=[
+        dict(house="한국투자증권", tp=590_000, date="2026-07-02",
+             note="12MF BPS x PBR 5.0배, HBM 2027 업계 1위 가정"),
+        dict(house="신한투자증권", tp=550_000, date="2026-06",
+             note="목표가 상향 (6월 보도 기준)"),
+        dict(house="현대차증권", tp=440_000, date="2026-06",
+             note="6월 보도 기준"),
+    ],
 )
 
 HYNIX = dict(
@@ -86,7 +102,66 @@ HYNIX = dict(
                  guide_share="삼성 대역전 시 40% · 완만 하락 55% · 현재 유지 62%"),
     ),
     source="컨센서스(노무라·KB 등) + 자체 조립: 마진 가정 범용 85% · HBM 72% · NAND 60%",
+    target_note=None,
+    targets=[
+        dict(house="노무라", tp=5_000_000, date="2026-06-25", note="해외 최상단"),
+        dict(house="한화투자증권", tp=4_300_000, date="2026-06-22", note="국내 최상단"),
+        dict(house="미래에셋증권", tp=4_200_000, date="2026-06-25", note=""),
+        dict(house="SK증권", tp=4_000_000, date="2026-06-01", note=""),
+        dict(house="KB증권", tp=3_800_000, date="2026-06-24", note=""),
+        dict(house="한국투자증권", tp=3_800_000, date="2026-05-20", note=""),
+        dict(house="골드만삭스", tp=3_500_000, date="2026-05-31", note=""),
+        dict(house="NH투자증권", tp=3_200_000, date="2026-06-08", note=""),
+        dict(house="JP모건", tp=3_000_000, date="2026-05-18", note="외국계 하단"),
+    ],
 )
+
+
+def _seed(key, val):
+    """위젯 생성 전에 session_state 기본값을 심어 value 인자와의 충돌을 피한다."""
+    if key not in st.session_state:
+        st.session_state[key] = val
+
+
+def _apply_target_scenario(cfg, implied_per):
+    """가격 슬라이더를 리포트 기준(0%)으로, PER을 목표가 함의 배수로 설정."""
+    st.session_state[f"{cfg['key']}_per"] = float(min(12.0, max(3.0, round(implied_per, 1))))
+    for year_key, year_cfg in (("26", cfg["y26"]), ("27", cfg["y27"])):
+        for seg in year_cfg["segs"]:
+            st.session_state[f"{cfg['key']}{year_key}_{seg['label']}"] = 0
+    st.session_state[f"{cfg['key']}_share"] = cfg["y27"]["hbm"]["share0"]
+    if cfg["y27"]["hbm"].get("price"):
+        st.session_state[f"{cfg['key']}_hbmp"] = 0
+
+
+def render_targets(cfg):
+    eps27 = cfg["y27"]["eps"]
+    st.markdown("#### 증권사 목표주가 & 시나리오")
+    if cfg.get("target_note"):
+        st.info(cfg["target_note"])
+    rows = []
+    for t in cfg["targets"]:
+        rows.append({
+            "증권사": t["house"],
+            "목표주가": f"{t['tp']:,}원",
+            "기준일": t["date"],
+            "현 주가 대비": f"{(t['tp'] / cfg['price0'] - 1) * 100:+.0f}%",
+            "함의 PER(27E)": round(t["tp"] / eps27, 1),
+            "비고": t["note"],
+        })
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.caption("함의 PER = 목표주가 ÷ 이 모델의 2027년 EPS. 증권사 자체 추정 EPS와 다를 수 있어 근사치.")
+
+    labels = [f"{t['house']} {t['tp']:,}원" for t in cfg["targets"]]
+    c1, c2 = st.columns([3, 1])
+    pick = c1.selectbox("목표가 시나리오 선택", labels, key=f"{cfg['key']}_tpsel",
+                        label_visibility="collapsed")
+    idx = labels.index(pick)
+    implied = cfg["targets"][idx]["tp"] / eps27
+    c2.button("슬라이더에 적용", key=f"{cfg['key']}_tpbtn",
+              on_click=_apply_target_scenario, args=(cfg, implied))
+    st.caption("적용 시: 가격 슬라이더 = 리포트 기준(0%) · HBM 점유율 = 기본 가정 · PER = 함의 배수 "
+               "→ 아래 2027년 주가 카드가 해당 목표주가 부근으로 이동합니다.")
 
 
 def won(n: float) -> str:
@@ -117,8 +192,9 @@ def price_sliders(cfg, year_cfg, prefix):
     for seg in year_cfg["segs"]:
         label = seg["label"]
         base_txt = f" (기준 {seg['unit']} {seg['price']})" if seg.get("price") else ""
+        _seed(f"{prefix}_{label}", 0)
         d = st.slider(
-            f"{label} 가격 변화율{base_txt}", -85, 30, 0, 1,
+            f"{label} 가격 변화율{base_txt}", -85, 30, step=1,
             key=f"{prefix}_{label}", format="%d%%", help=seg["guide"],
         )
         implied = ""
@@ -154,9 +230,12 @@ def render_company(cfg):
                     config={"displayModeBar": False}, key=f"{cfg['key']}_chart")
     st.caption(cfg["breakdown_note"])
 
+    render_targets(cfg)
+
+    _seed(f"{cfg['key']}_per", cfg["per0"])
     per = st.slider(
         "적용 PER 배수 (4배 = 사이클 바닥 · 10배 = 과거 평균권)",
-        3.0, 12.0, cfg["per0"], 0.1, key=f"{cfg['key']}_per",
+        3.0, 12.0, step=0.1, key=f"{cfg['key']}_per",
     )
 
     left, right = st.columns(2, gap="large")
@@ -173,14 +252,16 @@ def render_company(cfg):
         if cfg["y27"]["segs"]:
             d27 += price_sliders(cfg, cfg["y27"], f"{cfg['key']}27")
         hbm = cfg["y27"]["hbm"]
+        _seed(f"{cfg['key']}_share", hbm["share0"])
         share = st.slider(
-            "HBM 점유율 (2027년, 시장 약 225조원 가정)", 10, 70, hbm["share0"], 1,
+            "HBM 점유율 (2027년, 시장 약 225조원 가정)", 10, 70, step=1,
             key=f"{cfg['key']}_share", format="%d%%", help=hbm["guide_share"],
         )
         hbm_price_d = 0
         if hbm.get("price"):
+            _seed(f"{cfg['key']}_hbmp", 0)
             hbm_price_d = st.slider(
-                f"HBM 가격 변화율 (기준 $/Gb {hbm['price']})", -85, 30, 0, 1,
+                f"HBM 가격 변화율 (기준 $/Gb {hbm['price']})", -85, 30, step=1,
                 key=f"{cfg['key']}_hbmp", format="%d%%",
             )
         base_hbm_op = hbm["mkt"] * hbm["share0"] / 100 * hbm["margin"]
